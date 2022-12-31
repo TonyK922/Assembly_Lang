@@ -1637,6 +1637,10 @@ end
 
 程序第一行中的 “dw”的含义是定义字型数据。dw即define word。在这里，我们使用dw定义了8个字型数据（数据之间以逗号分隔），它们所占的内存空间的大小为16个字节。
 
+> dw 定义一个字
+> db 定义一个字节
+> dd 定义一个双字
+
 程序中的指令就要对这8个数据进行累加，可这8个数据在哪里呢？
 由于它们在代码段中，程序在运行的时候CS中存放代码段的段地址，所以我们可以从CS中得到它们的段地址。
 
@@ -1686,3 +1690,107 @@ code ends
 end start
 ```
 
+## 6.2 在代码段中使用栈
+
+完成下面的程序，利用栈，将程序中定义的数据逆序存放。 
+   assume cs:codesg
+   codesg segment
+      dw 0123h,0456h,0789h,0abch,0defh,0fedh,0cbah,0987h
+      ?
+   code ends
+   end
+
+程序运行时，定义的数据存放在cs:0~cs:15单元中，共8个字单元。依次将这8个字单元中的数据入栈，然后再依次出栈到这 8 个字单元中，从而实现数据的逆序存放。
+
+问题是，我们首先要有一段可当作栈的内存空间。如前所述，这段空间应该由系统来分配。可以在程序中通过定义数据来取得一段空间，然后将这段空间当作栈空间来用。 
+
+```asm
+assume cs:codesg
+codesg segment
+dw 0123H,0456H,0789H,0abcH,0defH,0fedH,0cbaH,0987H
+dw 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+start: mov ax,cs
+	   mov ss,ax
+	   mov sp,30h
+	   mov bx,0
+	   mov cx,8
+s: push cs:[bx]
+	   add bx,2
+	   loop s
+	   mov bx,0
+       mov cx,8
+s0: pop cs:[bx]
+	   add bx,2
+	   loop s0
+	   mov ax,4c00h
+	   int 21h
+codesg ends
+end start
+```
+
+dw可以说用它来定义数据, 也可以说用它来开辟内存空间.
+
+## 6.3 将数据、代码、栈放入不同的段
+
+在前面的内容中，我们在程序中用到了数据和栈，我们将数据、栈和代码都放到了一个段里面。我们在编程的时候要注意何处是数据，何处是栈，何处是代码。
+
+这样做显然有两个问题：
+（1）把它们放到一个段中使程序显得混乱；
+（2）前面程序中处理的数据很少，用到的栈空间也小，加上没有多长的代码，放到一个段里面没有问题。但如果数据、栈和代码需要的空间超过64KB，就不能放在一个段中（一个段的容量不能大于64 KB，是我们在学习中所用的8086模式的限制，并不是所有的处理器都这样）。
+
+所以，我们应该考虑用多个段来存放数据、代码和栈。
+
+怎样做呢？
+我们用和定义代码段一样的方法来定义多个段，然后在这些段里面定义需要的数据，或通过定义数据来取得栈空间。具体做法如程序6.4所示，这个程序实现了和程序6.3 一样的功能，不同之处在于它将数据、栈和代码放到了不同的段中:
+
+```asm
+assume cs:code,ds:data,ss:stack
+data segment
+	dw 0123H,0456H,0789H,0abcH,0defH,0fedH,0cbaH,0987H
+data ends
+stack segment
+	dw 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+stack ends
+code segment
+start:  mov ax,stack
+		mov ss,ax
+		mov sp,20h   ;设置栈顶ss:sp指向stack:20
+		mov ax,data
+		mov ds,ax    ;ds指向data段
+		mov bx,0     ;ds:[bx]指向data段第一个单元
+		mov cx,8
+s: 		push [bx]
+		add bx,2
+		loop s    ;将data段数据入栈
+		mov bx,0
+		mov cx,8
+s0: 	pop [bx]
+		add bx,2
+		loop s0
+		mov ax,4c00h
+		int 21h
+code ends
+end start
+```
+
+程序说明:
+
+1. 定义多个段的方法
+
+   跟定义一个段一样. 就是不同的段用不同的段名就行.`assume cs:code,ds:data,ss:stack`
+
+2. 对段地址的引用
+
+   在程序中, `段名`就相当于一个标号, 它`代表了段地址`. 所以`mov ax,data`就是把data段的段地址传给ax.
+
+   程序中“data”段中的数据“0abch”的地址就是：data:6。我们要将它送入bx中，就要用如下的代码：
+            mov ax,data
+            mov ds,ax
+            mov bx,ds:[6]
+   我们不能用下面的指令：
+            mov ds,data   
+            mov ax,ds:[6]
+
+   其中指令“mov ds,data” 是错误的，因为8086CPU不允许将一个数值直接送入段寄存器中。
+
+   程序中对段名的引用，如指令“mov ds,data”中的“data”，将被编译器处理为一个表示段地址的数值。
